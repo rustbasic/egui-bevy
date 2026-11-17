@@ -1,0 +1,16 @@
+[package]
+name = "egui-bevy"
+version = "0.0.1"
+edition = "2024"
+description = "Integration between egui and Bevy"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[lib]
+name = "egui_bevy"
+path = "src/lib.rs"
+
+[dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = ["std", "bevy_render", "bevy_core_pipeline", "bevy_window", "keyboard", "mouse"] }
+egui = { version = "=0.37.0", features = ["default_fonts"] }
+egui-wgpu = { version = "=0.37.0", default-features = false }

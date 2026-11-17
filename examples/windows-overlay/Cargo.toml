@@ -1,0 +1,11 @@
+[package]
+name = "egui-bevy-windows-overlay"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = ["2d"] }
+egui = "=0.37.0"
+egui_system_font_provider = "=0.37.0"
+egui-bevy = { path = "../.." }
