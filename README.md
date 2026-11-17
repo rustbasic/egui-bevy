@@ -15,3 +15,6 @@ app.add_plugins(EguiBevyPlugin::new(|ctx| {
 The callback runs on Bevy's main thread. The plugin forwards mouse, keyboard, DPI, and IME input, then composites egui over the Core2d final output. Multiple windows/views, WebAssembly, and release packaging are not yet supported.
 
 `examples/windows-overlay` is the Windows example and integration check.
+## Development
+
+This project is developed with the assistance of AI.
