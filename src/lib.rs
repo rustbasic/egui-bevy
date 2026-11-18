@@ -11,6 +11,7 @@ use bevy::{
     prelude::*,
     render::{
         RenderApp,
+        camera::ExtractedCamera,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_resource::RenderPassDescriptor,
         renderer::{RenderContext, RenderDevice, ViewQuery},
@@ -69,7 +70,6 @@ struct UiState {
 
 struct FramePacket {
     output: egui::FullOutput,
-    size_in_pixels: [u32; 2],
     pixels_per_point: f32,
 }
 
@@ -302,7 +302,6 @@ fn run_ui(
 
     let packet = FramePacket {
         output,
-        size_in_pixels: ui.size_in_pixels,
         pixels_per_point: ui.pixels_per_point,
     };
 
@@ -310,7 +309,6 @@ fn run_ui(
         if let Some(previous) = pending.as_mut() {
             // Merge texture deltas so a slow render frame cannot lose incremental atlas updates.
             previous.output.append(packet.output);
-            previous.size_in_pixels = packet.size_in_pixels;
             previous.pixels_per_point = packet.pixels_per_point;
         } else {
             *pending = Some(packet);
@@ -351,17 +349,20 @@ fn map_key(key: &BevyKey) -> Option<egui::Key> {
 }
 
 fn render_egui(
-    view: ViewQuery<&ViewTarget>,
+    view: ViewQuery<(&ViewTarget, &ExtractedCamera)>,
     mut render_context: RenderContext,
     render_device: Res<RenderDevice>,
     render_queue: Res<bevy::render::renderer::RenderQueue>,
     state: Res<RenderState>,
     mut renderer: Local<Option<Renderer>>,
     mut cached_paint_jobs: Local<Option<Vec<egui::ClippedPrimitive>>>,
-    mut cached_size_in_pixels: Local<[u32; 2]>,
     mut cached_pixels_per_point: Local<f32>,
 ) {
-    let target = view.into_inner();
+    let (target, camera) = view.into_inner();
+    let Some(target_size) = camera.physical_target_size else {
+        return;
+    };
+    let size_in_pixels = [target_size.x, target_size.y];
     let Some(format) = target.out_texture_view_format() else {
         return;
     };
@@ -387,7 +388,6 @@ fn render_egui(
             std::mem::take(&mut packet.output.shapes),
             packet.output.pixels_per_point,
         ));
-        *cached_size_in_pixels = packet.size_in_pixels;
         *cached_pixels_per_point = packet.pixels_per_point;
     }
 
@@ -395,7 +395,7 @@ fn render_egui(
         return;
     };
     let screen = ScreenDescriptor {
-        size_in_pixels: *cached_size_in_pixels,
+        size_in_pixels,
         pixels_per_point: *cached_pixels_per_point,
     };
     let device = render_device.wgpu_device();
