@@ -9,3 +9,4 @@
 
 # Windows executables
 *.exe
+.cargo/
