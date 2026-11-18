@@ -7,6 +7,7 @@ use bevy::{
         ButtonState,
         keyboard::{Key as BevyKey, KeyCode as BevyKeyCode, KeyboardInput},
         mouse::{MouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel},
+        touch::{ForceTouch, TouchInput, TouchPhase as BevyTouchPhase},
     },
     prelude::*,
     render::{
@@ -20,9 +21,12 @@ use bevy::{
     window::{CursorLeft, CursorMoved, Ime, PrimaryWindow, Window},
 };
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 type UiCallback = dyn Fn(&egui::Context) + Send + Sync + 'static;
@@ -64,6 +68,8 @@ struct UiState {
     events: Vec<egui::Event>,
     pending_clipboard_read: Option<bevy::clipboard::ClipboardRead>,
     cursor: Option<egui::Pos2>,
+    active_touches: BTreeSet<u64>,
+    pointer_touch_id: Option<u64>,
     size_in_pixels: [u32; 2],
     pixels_per_point: f32,
 }
@@ -106,6 +112,8 @@ impl Plugin for EguiBevyPlugin {
                 events: Vec::new(),
                 pending_clipboard_read: None,
                 cursor: None,
+                active_touches: BTreeSet::new(),
+                pointer_touch_id: None,
                 size_in_pixels: [0, 0],
                 pixels_per_point: 1.0,
             })
@@ -127,7 +135,8 @@ impl Plugin for EguiBevyPlugin {
 fn collect_input(
     mut ui: ResMut<UiState>,
     mut clipboard: ResMut<Clipboard>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut touch_events: MessageReader<TouchInput>,
     mut cursor_moved: MessageReader<CursorMoved>,
     mut cursor_left: MessageReader<CursorLeft>,
     mut mouse_buttons: MessageReader<MouseButtonInput>,
@@ -148,24 +157,107 @@ fn collect_input(
         command: keyboard.pressed(BevyKey::Control),
     };
     ui.events.push(egui::Event::ModifiersChanged(modifiers));
-    if let Ok(window) = windows.single() {
+    let primary_window = windows.single().ok();
+    if let Some((_, window)) = primary_window {
         ui.size_in_pixels = [window.physical_width(), window.physical_height()];
         ui.pixels_per_point = window.scale_factor();
-        ui.cursor = window.cursor_position().map(|p| egui::pos2(p.x, p.y));
+        if ui.active_touches.is_empty() {
+            ui.cursor = window.cursor_position().map(|p| egui::pos2(p.x, p.y));
+        }
     }
 
+    let mut touch_event_seen = false;
+    for event in touch_events.read() {
+        let Some((window_entity, _)) = primary_window else {
+            continue;
+        };
+        if event.window != window_entity {
+            continue;
+        }
+        touch_event_seen = true;
+        let pos = egui::pos2(event.position.x, event.position.y);
+        let phase = match event.phase {
+            BevyTouchPhase::Started => egui::TouchPhase::Start,
+            BevyTouchPhase::Moved => egui::TouchPhase::Move,
+            BevyTouchPhase::Ended => egui::TouchPhase::End,
+            BevyTouchPhase::Canceled => egui::TouchPhase::Cancel,
+        };
+        let force = event.force.map(|force| match force {
+            ForceTouch::Calibrated {
+                force,
+                max_possible_force,
+                ..
+            } => (force / max_possible_force).clamp(0.0, 1.0) as f32,
+            ForceTouch::Normalized(force) => force.clamp(0.0, 1.0) as f32,
+        });
+        // Bevy exposes finger IDs but not touch-device IDs, so use egui's unknown-device value.
+        ui.events.push(egui::Event::Touch {
+            device_id: egui::TouchDeviceId(0),
+            id: egui::TouchId(event.id),
+            phase,
+            pos,
+            force,
+        });
+        match event.phase {
+            BevyTouchPhase::Started => {
+                ui.active_touches.insert(event.id);
+                if ui.pointer_touch_id.is_none() {
+                    ui.pointer_touch_id = Some(event.id);
+                    ui.cursor = Some(pos);
+                    // egui needs pointer events in addition to touch events for normal widget interaction.
+                    ui.events.push(egui::Event::PointerMoved(pos));
+                    ui.events.push(egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers,
+                    });
+                }
+            }
+            BevyTouchPhase::Moved => {
+                if ui.pointer_touch_id == Some(event.id) {
+                    ui.cursor = Some(pos);
+                    ui.events.push(egui::Event::PointerMoved(pos));
+                }
+            }
+            BevyTouchPhase::Ended | BevyTouchPhase::Canceled => {
+                ui.active_touches.remove(&event.id);
+                if ui.pointer_touch_id == Some(event.id) {
+                    ui.events.push(egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers,
+                    });
+                    ui.pointer_touch_id = None;
+                    ui.cursor = None;
+                    ui.events.push(egui::Event::PointerGone);
+                }
+            }
+        }
+    }
+    let touch_owns_pointer = touch_event_seen || !ui.active_touches.is_empty();
+
     for event in cursor_moved.read() {
+        if touch_owns_pointer {
+            continue;
+        }
         let pos = egui::pos2(event.position.x, event.position.y);
         ui.cursor = Some(pos);
         ui.events.push(egui::Event::PointerMoved(pos));
     }
 
     for _ in cursor_left.read() {
-        ui.cursor = None;
-        ui.events.push(egui::Event::PointerGone);
+        if !touch_owns_pointer {
+            ui.cursor = None;
+            ui.events.push(egui::Event::PointerGone);
+        }
     }
 
     for event in mouse_buttons.read() {
+        if touch_owns_pointer {
+            continue;
+        }
         let Some(pos) = ui.cursor else { continue };
         let button = match event.button {
             MouseButton::Left => egui::PointerButton::Primary,
