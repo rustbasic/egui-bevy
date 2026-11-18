@@ -1,7 +1,7 @@
-//! Integration between egui and Bevy Core2d.
+//! Integration between egui and Bevy Core2d and Core3d.
 use bevy::{
     app::{App, Plugin},
-    core_pipeline::{Core2d, Core2dSystems},
+    core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems},
     input::{
         ButtonState,
         keyboard::{Key as BevyKey, KeyCode as BevyKeyCode, KeyboardInput},
@@ -25,10 +25,10 @@ use std::sync::{
 
 type UiCallback = dyn Fn(&egui::Context) + Send + Sync + 'static;
 
-/// Runs an egui UI callback on Bevy's main thread and composites it over Core2d output.
+/// Runs an egui UI callback on Bevy's main thread and composites it over Core2d or Core3d output.
 ///
 /// Add this plugin after Bevy's renderer plugins. This MVP supports one primary window and one
-/// Core2d view; the callback is invoked on the main thread so it may safely access game resources
+/// Core2d or Core3d view; the callback is invoked on the main thread so it may safely access game resources
 /// captured through thread-safe shared state.
 pub struct EguiBevyPlugin {
     ui: Arc<UiCallback>,
@@ -98,6 +98,7 @@ impl Plugin for EguiBevyPlugin {
             .get_sub_app_mut(RenderApp)
             .expect("EguiBevyPlugin requires Bevy's render plugins");
         render_app.add_systems(Core2d, render_egui.after(Core2dSystems::PostProcess));
+        render_app.add_systems(Core3d, render_egui.after(Core3dSystems::PostProcess));
     }
 }
 
@@ -126,15 +127,18 @@ fn collect_input(
         ui.pixels_per_point = window.scale_factor();
         ui.cursor = window.cursor_position().map(|p| egui::pos2(p.x, p.y));
     }
+
     for event in cursor_moved.read() {
         let pos = egui::pos2(event.position.x, event.position.y);
         ui.cursor = Some(pos);
         ui.events.push(egui::Event::PointerMoved(pos));
     }
+
     for _ in cursor_left.read() {
         ui.cursor = None;
         ui.events.push(egui::Event::PointerGone);
     }
+
     for event in mouse_buttons.read() {
         let Some(pos) = ui.cursor else { continue };
         let button = match event.button {
@@ -152,6 +156,7 @@ fn collect_input(
             modifiers,
         });
     }
+
     for event in mouse_wheels.read() {
         let unit = match event.unit {
             MouseScrollUnit::Pixel => egui::MouseWheelUnit::Point,
@@ -172,6 +177,7 @@ fn collect_input(
             modifiers,
         });
     }
+
     for event in ime_events.read() {
         let mapped = match event {
             Ime::Preedit { value, cursor, .. } => Some(egui::ImeEvent::Preedit {
@@ -185,6 +191,7 @@ fn collect_input(
             ui.events.push(egui::Event::Ime(event));
         }
     }
+
     for event in keyboard_events.read() {
         if let Some(text) = &event.text {
             if event.state == ButtonState::Pressed
@@ -225,6 +232,7 @@ fn run_ui(
     };
     let callback = ui.ui.clone();
     let output = ui.context.run_pass(input, |ctx| callback(ctx));
+
     if let Some(ime) = output.platform_output.ime.as_ref() {
         render.ime_enabled.store(true, Ordering::Relaxed);
         if let Ok(mut pos) = render.ime_position.lock() {
@@ -233,17 +241,20 @@ fn run_ui(
     } else {
         render.ime_enabled.store(false, Ordering::Relaxed);
     }
+
     if let Ok(mut window) = windows.single_mut() {
         window.ime_enabled = render.ime_enabled.load(Ordering::Relaxed);
         if let Ok(pos) = render.ime_position.lock() {
             window.ime_position = *pos;
         }
     }
+
     let packet = FramePacket {
         output,
         size_in_pixels: ui.size_in_pixels,
         pixels_per_point: ui.pixels_per_point,
     };
+
     if let Ok(mut pending) = render.pending_frame.lock() {
         if let Some(previous) = pending.as_mut() {
             // Merge texture deltas so a slow render frame cannot lose incremental atlas updates.
@@ -306,6 +317,7 @@ fn render_egui(
         .lock()
         .ok()
         .and_then(|mut pending| pending.take());
+
     if let Some(packet) = packet.as_mut() {
         let device = render_device.wgpu_device();
         let renderer = renderer
@@ -322,6 +334,7 @@ fn render_egui(
         *cached_size_in_pixels = packet.size_in_pixels;
         *cached_pixels_per_point = packet.pixels_per_point;
     }
+
     let Some(paint_jobs) = cached_paint_jobs.as_ref() else {
         return;
     };
@@ -339,9 +352,11 @@ fn render_egui(
         paint_jobs,
         &screen,
     );
+
     for buffer in command_buffers {
         render_context.add_command_buffer(buffer);
     }
+
     let descriptor = RenderPassDescriptor {
         label: Some("egui-bevy overlay"),
         color_attachments: &[Some(attachment)],
@@ -354,6 +369,7 @@ fn render_egui(
         .command_encoder()
         .begin_render_pass(&descriptor)
         .forget_lifetime();
+
     renderer.render(&mut pass, paint_jobs, &screen);
     drop(pass);
     if let Some(packet) = packet.as_mut() {
