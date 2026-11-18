@@ -1,6 +1,7 @@
 //! Integration between egui and Bevy Core2d and Core3d.
 use bevy::{
     app::{App, Plugin},
+    clipboard::Clipboard,
     core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems},
     input::{
         ButtonState,
@@ -41,11 +42,26 @@ impl EguiBevyPlugin {
     }
 }
 
+/// Schedule set for egui input collection and UI processing in `Update`.
+/// Systems that read [`EguiPointerState`] should run after this set.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EguiBevySet {
+    RunUi,
+}
+/// Reports whether egui is interacting with the pointer in the most recently processed frame.
+#[derive(Resource, Clone, Copy, Debug, Default)]
+pub struct EguiPointerState {
+    /// Whether the pointer is over an egui area.
+    pub pointer_over_egui: bool,
+    /// Whether egui is actively using the pointer, such as dragging a window or widget.
+    pub is_using_pointer: bool,
+}
 #[derive(Resource)]
 struct UiState {
     context: egui::Context,
     ui: Arc<UiCallback>,
     events: Vec<egui::Event>,
+    pending_clipboard_read: Option<bevy::clipboard::ClipboardRead>,
     cursor: Option<egui::Pos2>,
     size_in_pixels: [u32; 2],
     pixels_per_point: f32,
@@ -82,17 +98,23 @@ impl Plugin for EguiBevyPlugin {
             ime_enabled: Arc::default(),
             ime_position: Arc::new(Mutex::new(Vec2::ZERO)),
         };
-        app.insert_resource(UiState {
-            context,
-            ui: self.ui.clone(),
-            events: Vec::new(),
-            cursor: None,
-            size_in_pixels: [0, 0],
-            pixels_per_point: 1.0,
-        })
-        .insert_resource(render_state)
-        .add_plugins(ExtractResourcePlugin::<RenderState>::default())
-        .add_systems(Update, (collect_input, run_ui).chain());
+        app.init_resource::<Clipboard>()
+            .insert_resource(EguiPointerState::default())
+            .insert_resource(UiState {
+                context,
+                ui: self.ui.clone(),
+                events: Vec::new(),
+                pending_clipboard_read: None,
+                cursor: None,
+                size_in_pixels: [0, 0],
+                pixels_per_point: 1.0,
+            })
+            .insert_resource(render_state)
+            .add_plugins(ExtractResourcePlugin::<RenderState>::default())
+            .add_systems(
+                Update,
+                (collect_input, run_ui).chain().in_set(EguiBevySet::RunUi),
+            );
 
         let render_app = app
             .get_sub_app_mut(RenderApp)
@@ -104,6 +126,7 @@ impl Plugin for EguiBevyPlugin {
 
 fn collect_input(
     mut ui: ResMut<UiState>,
+    mut clipboard: ResMut<Clipboard>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cursor_moved: MessageReader<CursorMoved>,
     mut cursor_left: MessageReader<CursorLeft>,
@@ -114,6 +137,9 @@ fn collect_input(
     keyboard: Res<ButtonInput<BevyKey>>,
 ) {
     ui.events.clear();
+    if let Some(read) = ui.pending_clipboard_read.take() {
+        append_clipboard_read(&mut ui, read);
+    }
     let modifiers = egui::Modifiers {
         alt: keyboard.pressed(BevyKey::Alt),
         ctrl: keyboard.pressed(BevyKey::Control),
@@ -203,7 +229,15 @@ fn collect_input(
             }
         }
         let physical = map_physical_key(event.key_code);
-        if let Some(key) = physical.or_else(|| map_key(&event.logical_key)) {
+        if let Some(key) = map_key(&event.logical_key).or(physical) {
+            if event.state == ButtonState::Pressed && !event.repeat && modifiers.command {
+                match key {
+                    egui::Key::C => ui.events.push(egui::Event::Copy),
+                    egui::Key::X => ui.events.push(egui::Event::Cut),
+                    egui::Key::V => append_clipboard_read(&mut ui, clipboard.fetch_text()),
+                    _ => {}
+                }
+            }
             ui.events.push(egui::Event::Key {
                 key,
                 physical_key: physical,
@@ -215,9 +249,19 @@ fn collect_input(
     }
 }
 
+fn append_clipboard_read(ui: &mut UiState, mut read: bevy::clipboard::ClipboardRead) {
+    match read.poll_result() {
+        Some(Ok(text)) => ui.events.push(egui::Event::Paste(text)),
+        Some(Err(_)) => {}
+        None => ui.pending_clipboard_read = Some(read),
+    }
+}
+
 fn run_ui(
     mut ui: ResMut<UiState>,
+    mut pointer_state: ResMut<EguiPointerState>,
     render: Res<RenderState>,
+    mut clipboard: ResMut<Clipboard>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let scale = ui.pixels_per_point.max(f32::EPSILON);
@@ -232,6 +276,13 @@ fn run_ui(
     };
     let callback = ui.ui.clone();
     let output = ui.context.run_pass(input, |ctx| callback(ctx));
+    pointer_state.pointer_over_egui = ui.context.is_pointer_over_egui();
+    pointer_state.is_using_pointer = ui.context.egui_is_using_pointer();
+    for command in &output.platform_output.commands {
+        if let egui::OutputCommand::CopyText(text) = command {
+            let _ = clipboard.set_text(text);
+        }
+    }
 
     if let Some(ime) = output.platform_output.ime.as_ref() {
         render.ime_enabled.store(true, Ordering::Relaxed);
@@ -270,6 +321,10 @@ fn run_ui(
 fn map_physical_key(code: BevyKeyCode) -> Option<egui::Key> {
     match code {
         BevyKeyCode::Backspace | BevyKeyCode::NumpadBackspace => Some(egui::Key::Backspace),
+        BevyKeyCode::Insert => Some(egui::Key::Insert),
+        BevyKeyCode::KeyC => Some(egui::Key::C),
+        BevyKeyCode::KeyV => Some(egui::Key::V),
+        BevyKeyCode::KeyX => Some(egui::Key::X),
         _ => None,
     }
 }
@@ -281,6 +336,7 @@ fn map_key(key: &BevyKey) -> Option<egui::Key> {
         BevyKey::Tab => Some(egui::Key::Tab),
         BevyKey::Backspace => Some(egui::Key::Backspace),
         BevyKey::Delete => Some(egui::Key::Delete),
+        BevyKey::Insert => Some(egui::Key::Insert),
         BevyKey::Escape => Some(egui::Key::Escape),
         BevyKey::ArrowDown => Some(egui::Key::ArrowDown),
         BevyKey::ArrowLeft => Some(egui::Key::ArrowLeft),

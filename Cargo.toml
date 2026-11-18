@@ -1,6 +1,6 @@
 [package]
 name = "egui-bevy"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Integration between egui and Bevy"
 repository = "https://github.com/rustbasic/egui-bevy"
@@ -14,6 +14,6 @@ name = "egui_bevy"
 path = "src/lib.rs"
 
 [dependencies]
-bevy = { version = "=0.20.1", default-features = false, features = ["std", "bevy_render", "bevy_core_pipeline", "bevy_window", "keyboard", "mouse"] }
+bevy = { version = "=0.20.1", default-features = false, features = ["std", "bevy_render", "bevy_core_pipeline", "bevy_window", "keyboard", "mouse", "system_clipboard"] }
 egui = { version = "=0.37.0", features = ["default_fonts"] }
 egui-wgpu = { version = "=0.37.0", default-features = false }

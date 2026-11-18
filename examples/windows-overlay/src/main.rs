@@ -55,13 +55,24 @@ fn setup_scene(
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     commands.spawn(Camera2d);
-    commands.spawn((
-        Sprite::from_color(Color::srgb(0.2, 0.7, 0.9), Vec2::new(180.0, 120.0)),
-        Transform::from_xyz(-180.0, -130.0, 0.0),
-    ));
-    commands.spawn((
-        Mesh2d(meshes.add(Circle::new(70.0))),
-        MeshMaterial2d(materials.add(Color::srgb(0.9, 0.45, 0.2))),
-        Transform::from_xyz(180.0, -130.0, 0.0),
-    ));
+    let circle_mesh = meshes.add(Circle::new(45.0));
+    let circle_material = materials.add(Color::srgb(0.9, 0.45, 0.2));
+    for row in 0..3 {
+        for column in 0..4 {
+            let x = (column as f32 - 1.5) * 150.0;
+            let y = (1.0 - row as f32) * 150.0;
+            if (row + column) % 2 == 0 {
+                commands.spawn((
+                    Sprite::from_color(Color::srgb(0.2, 0.7, 0.9), Vec2::new(100.0, 100.0)),
+                    Transform::from_xyz(x, y, 0.0),
+                ));
+            } else {
+                commands.spawn((
+                    Mesh2d(circle_mesh.clone()),
+                    MeshMaterial2d(circle_material.clone()),
+                    Transform::from_xyz(x, y, 0.0),
+                ));
+            }
+        }
+    }
 }
