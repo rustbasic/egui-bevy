@@ -11,6 +11,7 @@ use std::sync::{
 struct OverlayState {
     rotating: Mutex<bool>,
     rotation_speed: Mutex<f32>,
+    notes: Mutex<String>,
     block_camera_when_egui_uses_pointer: Mutex<bool>,
     font_provider_installed: AtomicBool,
 }
@@ -33,6 +34,7 @@ fn main() {
     let state = Arc::new(OverlayState {
         rotating: Mutex::new(true),
         rotation_speed: Mutex::new(0.8),
+        notes: Mutex::new(String::new()),
         block_camera_when_egui_uses_pointer: Mutex::new(true),
         font_provider_installed: AtomicBool::new(false),
     });
@@ -74,6 +76,19 @@ fn create_egui_plugin(state: Arc<OverlayState>) -> EguiBevyPlugin {
                 }
                 if let Ok(mut speed) = state.rotation_speed.lock() {
                     ui.add(egui::Slider::new(&mut *speed, 0.0..=2.0).text("Rotation speed"));
+                }
+            });
+
+        egui::Window::new("Notes")
+            .default_pos(egui::pos2(440.0, 24.0))
+            .show(context, |ui| {
+                ui.label("Multiline text editor");
+                if let Ok(mut notes) = state.notes.lock() {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut *notes)
+                            .desired_rows(8)
+                            .desired_width(320.0),
+                    );
                 }
             });
     })

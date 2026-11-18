@@ -29,7 +29,7 @@ The callback runs on Bevy's main thread. The plugin forwards mouse, keyboard, DP
 
 `examples/windows-overlay` demonstrates a 2D scene with egui. `examples/windows-3d-overlay` demonstrates a rotating 3D cube with interactive egui controls on Windows.
 
-![Screenshot of the Windows 3D overlay example](egui-bevy-v012.png)
+![Screenshot of the Windows 3D overlay example](egui-bevy-v015.png)
 
 ## Development
 
