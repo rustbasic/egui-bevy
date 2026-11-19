@@ -3,17 +3,13 @@ use bevy::input::mouse::{
 };
 use bevy::prelude::*;
 use egui_bevy::{EguiBevyPlugin, EguiBevySet, EguiPointerState};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 
 struct OverlayState {
     rotating: Mutex<bool>,
     rotation_speed: Mutex<f32>,
     notes: Mutex<String>,
     block_camera_when_egui_uses_pointer: Mutex<bool>,
-    font_provider_installed: AtomicBool,
 }
 
 #[derive(Resource, Clone)]
@@ -36,7 +32,6 @@ fn main() {
         rotation_speed: Mutex::new(0.8),
         notes: Mutex::new(String::new()),
         block_camera_when_egui_uses_pointer: Mutex::new(true),
-        font_provider_installed: AtomicBool::new(false),
     });
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -58,11 +53,6 @@ fn main() {
 
 fn create_egui_plugin(state: Arc<OverlayState>) -> EguiBevyPlugin {
     EguiBevyPlugin::new(move |context| {
-        if !state.font_provider_installed.swap(true, Ordering::Relaxed) {
-            context.add_font_provider(Arc::new(
-                egui_system_font_provider::SystemFontProvider::new().with_locale(Some("ko")),
-            ));
-        }
         egui::Window::new("3D scene controls")
             .default_pos(egui::pos2(24.0, 24.0))
             .show(context, |ui| {
