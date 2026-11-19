@@ -1,15 +1,11 @@
 use bevy::prelude::*;
 use egui_bevy::EguiBevyPlugin;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct OverlayState {
     text: Mutex<String>,
     enabled: Mutex<bool>,
-    font_provider_installed: AtomicBool,
 }
 
 fn main() {
@@ -29,11 +25,6 @@ fn main() {
 
 fn create_egui_plugin(state: Arc<OverlayState>) -> EguiBevyPlugin {
     EguiBevyPlugin::new(move |context| {
-        if !state.font_provider_installed.swap(true, Ordering::Relaxed) {
-            context.add_font_provider(Arc::new(
-                egui_system_font_provider::SystemFontProvider::new().with_locale(Some("ko")),
-            ));
-        }
         egui::Window::new("egui overlay")
             .default_pos(egui::pos2(24.0, 24.0))
             .show(context, |ui| {

@@ -28,6 +28,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+#[cfg(target_arch = "wasm32")]
+mod web_input;
 
 type UiCallback = dyn Fn(&egui::Context) + Send + Sync + 'static;
 
@@ -98,6 +100,11 @@ impl ExtractResource<RenderApp> for RenderState {
 impl Plugin for EguiBevyPlugin {
     fn build(&self, app: &mut App) {
         let context = egui::Context::default();
+        // egui_system_font_provider 0.37.0 uses thread-only APIs and does not compile on WASM.
+        #[cfg(not(target_arch = "wasm32"))]
+        context.add_font_provider(Arc::new(
+            egui_system_font_provider::SystemFontProvider::new().with_locale(Some("ko")),
+        ));
         let render_state = RenderState {
             context: context.clone(),
             pending_frame: Arc::default(),
@@ -127,6 +134,8 @@ impl Plugin for EguiBevyPlugin {
         let render_app = app
             .get_sub_app_mut(RenderApp)
             .expect("EguiBevyPlugin requires Bevy's render plugins");
+        #[cfg(target_arch = "wasm32")]
+        web_input::install();
         render_app.add_systems(Core2d, render_egui.after(Core2dSystems::PostProcess));
         render_app.add_systems(Core3d, render_egui.after(Core3dSystems::PostProcess));
     }
@@ -146,6 +155,8 @@ fn collect_input(
     keyboard: Res<ButtonInput<BevyKey>>,
 ) {
     ui.events.clear();
+    #[cfg(target_arch = "wasm32")]
+    ui.events.extend(web_input::take_events());
     if let Some(read) = ui.pending_clipboard_read.take() {
         append_clipboard_read(&mut ui, read);
     }
@@ -368,6 +379,8 @@ fn run_ui(
     };
     let callback = ui.ui.clone();
     let output = ui.context.run_pass(input, |ctx| callback(ctx));
+    #[cfg(target_arch = "wasm32")]
+    web_input::update_focus(output.platform_output.ime.is_some());
     pointer_state.pointer_over_egui = ui.context.is_pointer_over_egui();
     pointer_state.is_using_pointer = ui.context.egui_is_using_pointer();
     for command in &output.platform_output.commands {
