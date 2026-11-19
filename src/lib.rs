@@ -29,6 +29,8 @@ use std::{
     },
 };
 #[cfg(target_arch = "wasm32")]
+mod web_canvas_glyphs;
+#[cfg(target_arch = "wasm32")]
 mod web_input;
 
 type UiCallback = dyn Fn(&egui::Context) + Send + Sync + 'static;
@@ -100,10 +102,12 @@ impl ExtractResource<RenderApp> for RenderState {
 impl Plugin for EguiBevyPlugin {
     fn build(&self, app: &mut App) {
         let context = egui::Context::default();
+        #[cfg(target_arch = "wasm32")]
+        context.add_glyph_rasterizer(web_canvas_glyphs::glyph_rasterizer());
         // egui_system_font_provider 0.37.0 uses thread-only APIs and does not compile on WASM.
         #[cfg(not(target_arch = "wasm32"))]
         context.add_font_provider(Arc::new(
-            egui_system_font_provider::SystemFontProvider::new().with_locale(Some("ko")),
+            egui_system_font_provider::SystemFontProvider::new(),
         ));
         let render_state = RenderState {
             context: context.clone(),
