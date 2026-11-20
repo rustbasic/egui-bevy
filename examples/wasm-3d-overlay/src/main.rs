@@ -1,18 +1,28 @@
 use bevy::input::mouse::{
     AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollPixelsPerLine,
 };
+use bevy::input::touch::{TouchInput, TouchPhase};
 use bevy::prelude::*;
 use egui_bevy::{EguiBevyPlugin, EguiBevySet, EguiPointerState};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 struct OverlayState {
     rotating: Mutex<bool>,
     speed: Mutex<f32>,
     notes: Mutex<String>,
+    block_camera_when_egui_uses_pointer: Mutex<bool>,
 }
 
 #[derive(Resource, Clone)]
 struct DemoState(Arc<OverlayState>);
+
+// Track active fingers to distinguish one-finger orbit from two-finger pinch zoom.
+#[derive(Resource, Default)]
+struct TouchOrbitState {
+    positions: BTreeMap<u64, Vec2>,
+    pinch_distance: Option<f32>,
+}
 
 #[derive(Component)]
 struct RotatingCube;
@@ -43,6 +53,7 @@ fn run_app() {
         rotating: Mutex::new(true),
         speed: Mutex::new(0.8),
         notes: Mutex::new(String::new()),
+        block_camera_when_egui_uses_pointer: Mutex::new(true),
     });
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -56,12 +67,16 @@ fn run_app() {
             ..default()
         }))
         .insert_resource(DemoState(state.clone()))
+        .insert_resource(TouchOrbitState::default())
         .add_plugins(EguiBevyPlugin::new(move |ctx| {
             egui::Window::new("3D scene controls")
                 .default_pos(egui::pos2(20.0, 20.0))
                 .show(ctx, |ui| {
                     ui.heading("egui over Bevy Core3d");
-                    ui.label("Drag to orbit; use the wheel to zoom.");
+                    ui.label("Drag with the mouse or one finger to orbit; use the wheel or pinch to zoom.");
+                    if let Ok(mut block_camera) = state.block_camera_when_egui_uses_pointer.lock() {
+                        ui.checkbox(&mut block_camera, "Block camera while using egui");
+                    }
                     if let Ok(mut rotating) = state.rotating.lock() {
                         ui.checkbox(&mut rotating, "Rotate cubes");
                     }
@@ -143,24 +158,76 @@ fn rotate_cubes(
 
 fn orbit_camera(
     buttons: Res<ButtonInput<MouseButton>>,
+    state: Res<DemoState>,
     pointer: Res<EguiPointerState>,
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     pixels_per_line: Res<MouseScrollPixelsPerLine>,
+    mut touch_events: MessageReader<TouchInput>,
+    mut touch_orbit: ResMut<TouchOrbitState>,
     mut camera: Query<(&mut Transform, &mut OrbitCamera), With<Camera3d>>,
 ) {
+    let block_camera = state
+        .0
+        .block_camera_when_egui_uses_pointer
+        .lock()
+        .map(|value| *value)
+        .unwrap_or(true);
+    let pointer_over_egui = pointer.pointer_over_egui || pointer.is_using_pointer;
+    let camera_input_blocked = block_camera && pointer_over_egui;
+
+    let mut touch_delta = Vec2::ZERO;
+    for event in touch_events.read() {
+        match event.phase {
+            TouchPhase::Started => {
+                touch_orbit.positions.insert(event.id, event.position);
+            }
+            TouchPhase::Moved => {
+                let is_single_touch = touch_orbit.positions.len() == 1;
+                if let Some(previous) = touch_orbit.positions.get_mut(&event.id) {
+                    if is_single_touch {
+                        touch_delta += event.position - *previous;
+                    }
+                    *previous = event.position;
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                touch_orbit.positions.remove(&event.id);
+            }
+        }
+    }
+
+    let pinch_delta = if touch_orbit.positions.len() >= 2 {
+        let mut positions = touch_orbit.positions.values();
+        let first = *positions.next().expect("at least two active touches");
+        let second = *positions.next().expect("at least two active touches");
+        let distance = first.distance(second);
+        let delta = touch_orbit
+            .pinch_distance
+            .map_or(0.0, |previous| distance - previous);
+        touch_orbit.pinch_distance = Some(distance);
+        delta
+    } else {
+        touch_orbit.pinch_distance = None;
+        0.0
+    };
+
+    if camera_input_blocked {
+        return;
+    }
     let Ok((mut transform, mut orbit)) = camera.single_mut() else {
         return;
     };
-    if pointer.pointer_over_egui || pointer.is_using_pointer {
-        return;
-    }
     if buttons.pressed(MouseButton::Left) {
-        orbit.yaw -= motion.delta.x * 0.005;
-        orbit.pitch = (orbit.pitch + motion.delta.y * 0.005).clamp(-1.5, 1.5);
+        orbit.yaw -= (motion.delta.x + touch_delta.x) * 0.005;
+        orbit.pitch = (orbit.pitch + (motion.delta.y + touch_delta.y) * 0.005).clamp(-1.5, 1.5);
+    } else if touch_orbit.positions.len() == 1 {
+        orbit.yaw -= touch_delta.x * 0.005;
+        orbit.pitch = (orbit.pitch + touch_delta.y * 0.005).clamp(-1.5, 1.5);
     }
-    orbit.radius =
-        (orbit.radius * (-scroll.to_lines(&pixels_per_line).delta.y * 0.15).exp()).clamp(5.0, 40.0);
+    let wheel_zoom = -scroll.to_lines(&pixels_per_line).delta.y * 0.15;
+    let pinch_zoom = -pinch_delta * 0.01;
+    orbit.radius = (orbit.radius * (wheel_zoom + pinch_zoom).exp()).clamp(5.0, 40.0);
     transform.translation = camera_position(&orbit);
     transform.look_at(Vec3::ZERO, Vec3::Y);
 }
