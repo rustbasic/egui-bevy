@@ -3,8 +3,9 @@
 
 **/.cargo/
 
-# Cargo.lock is ignored for this library; the standalone example lockfile stays included.
+# Cargo.lock is ignored for this library and the standalone WASM example.
 /Cargo.lock
+/examples/wasm-3d-overlay/Cargo.lock
 
 # Rustfmt backup files
 **/*.rs.bk
