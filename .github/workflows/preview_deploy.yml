@@ -1,0 +1,133 @@
+name: Preview Deploy
+
+on:
+  workflow_run:
+    workflows: [Preview Build]
+    types: [completed]
+
+permissions:
+  actions: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: pr-preview-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Find the associated open pull request
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            let candidates = run.pull_requests || [];
+            if (candidates.length === 0) {
+              const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: run.head_sha,
+              });
+              candidates = response.data;
+            }
+            const candidate = candidates.find(pr =>
+              pr.head?.ref === run.head_branch &&
+              (!run.head_repository?.full_name || pr.head?.repo?.full_name === run.head_repository.full_name)
+            );
+            if (!candidate) {
+              core.notice('No matching pull request was found; skipping preview deployment.');
+              core.setOutput('number', '');
+              core.setOutput('head_sha', '');
+              return;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: candidate.number,
+            });
+            if (pr.state !== 'open') {
+              core.notice('Pull request is no longer open; skipping preview deployment.');
+              core.setOutput('number', '');
+              core.setOutput('head_sha', '');
+              return;
+            }
+            core.setOutput('number', String(pr.number));
+            core.setOutput('head_sha', pr.head.sha);
+      - uses: actions/download-artifact@v4
+        if: steps.pr.outputs.number != ''
+        with:
+          name: preview-site
+          path: preview-site
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - uses: actions/download-artifact@v4
+        if: steps.pr.outputs.number != ''
+        with:
+          name: preview-meta
+          path: preview-meta
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Verify the artifact matches the current PR revision
+        id: verify
+        if: steps.pr.outputs.number != ''
+        env:
+          EXPECTED_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          ACTUAL_SHA=$(cat preview-meta/head-sha)
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "Preview artifact is stale; skipping deployment."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Configure deploy key
+        if: steps.verify.outputs.deploy == 'true'
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+      - name: Publish preview to the preview repository
+        if: steps.verify.outputs.deploy == 'true'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          git clone --depth 1 --branch main git@github.com:rustbasic/egui-bevy-pr-preview.git preview-repo
+          rm -rf "preview-repo/pr/$PR_NUMBER"
+          mkdir -p "preview-repo/pr/$PR_NUMBER"
+          cp -R preview-site/. "preview-repo/pr/$PR_NUMBER/"
+          touch preview-repo/.nojekyll
+          git -C preview-repo config user.name 'github-actions[bot]'
+          git -C preview-repo config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C preview-repo add -- "pr/$PR_NUMBER" .nojekyll
+          if ! git -C preview-repo diff --cached --quiet; then
+            git -C preview-repo commit -m "Update preview for PR $PR_NUMBER"
+            git -C preview-repo push origin main
+          fi
+      - name: Update the PR preview comment
+        if: steps.verify.outputs.deploy == 'true'
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        with:
+          script: |
+            const number = Number(process.env.PR_NUMBER);
+            const marker = '<!-- egui-bevy-pr-preview -->';
+            const url = `https://rustbasic.github.io/egui-bevy-pr-preview/pr/${number}/`;
+            const body = `Preview is available at ${url}\n\n${marker}`;
+            const { owner, repo } = context.repo;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number });
+            const existing = comments.find(comment => comment.body?.includes(marker) && comment.user?.type === 'Bot');
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: number, body });
+            }
