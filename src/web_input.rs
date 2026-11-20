@@ -17,6 +17,7 @@ struct WebInput {
     _listeners: Vec<Closure<dyn FnMut(Event)>>,
     focused: Rc<Cell<bool>>,
     ime_enabled: Rc<Cell<bool>>,
+    last_text: Rc<RefCell<String>>,
 }
 
 pub(crate) fn install() {
@@ -60,6 +61,7 @@ pub(crate) fn install() {
         }
 
         let composing = Rc::new(Cell::new(false));
+        let last_text = Rc::new(RefCell::new(String::new()));
         let focused = Rc::new(Cell::new(false));
         let ime_enabled = Rc::new(Cell::new(false));
         let mut listeners = Vec::new();
@@ -72,62 +74,89 @@ pub(crate) fn install() {
         }
 
         {
-            add_listener(&input, "compositionupdate", &mut listeners, move |event| {
-                if let Ok(event) = event.dyn_into::<web_sys::CompositionEvent>() {
-                    push_event(egui::Event::Ime(egui::ImeEvent::Preedit {
-                        text: event.data().unwrap_or_default(),
-                        active_range_chars: None,
-                    }));
-                }
-            });
-        }
-
-        {
             let composing = composing.clone();
+            let last_text = last_text.clone();
             let input_for_event = input.clone();
             add_listener(&input, "compositionend", &mut listeners, move |event| {
                 composing.set(false);
-                if let Ok(event) = event.dyn_into::<web_sys::CompositionEvent>() {
-                    push_event(egui::Event::Ime(egui::ImeEvent::Commit(
-                        event.data().unwrap_or_default(),
-                    )));
+                let Ok(event) = event.dyn_into::<web_sys::CompositionEvent>() else {
+                    return;
+                };
+                let mut text = input_for_event.value();
+                let prefix_len = last_text.borrow().chars().count();
+                let mut commit_text = text.chars().skip(prefix_len).collect::<String>();
+                if text.is_empty() && commit_text.is_empty() {
+                    commit_text = event.data().unwrap_or_default();
+                    text = commit_text.clone();
+                    input_for_event.set_value(&text);
                 }
-                input_for_event.set_value("");
+                // Some IMEs emit a final input event after compositionend; retain the value so it can be deduplicated.
+                *last_text.borrow_mut() = text;
+                push_event(egui::Event::Ime(egui::ImeEvent::Commit(commit_text)));
             });
         }
 
         {
             let composing = composing.clone();
+            let last_text = last_text.clone();
             let input_for_event = input.clone();
             add_listener(&input, "input", &mut listeners, move |event| {
-                if composing.get() {
-                    return;
-                }
                 let Ok(event) = event.dyn_into::<web_sys::InputEvent>() else {
                     return;
                 };
-                match event.input_type().as_str() {
+                let input_type = event.input_type();
+                let is_composing = composing.get() || event.is_composing();
+                let text = input_for_event.value();
+                if is_composing {
+                    let previous = last_text.borrow().clone();
+                    let prefix_len = longest_common_prefix_length(&text, &previous);
+                    let previous_len = previous.chars().count();
+                    if prefix_len < previous_len {
+                        push_event(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
+                            before_chars: previous_len - prefix_len,
+                            after_chars: 0,
+                        }));
+                    }
+                    let preedit_text = text.chars().skip(prefix_len).collect();
+                    *last_text.borrow_mut() = text.chars().take(prefix_len).collect();
+                    push_event(egui::Event::Ime(egui::ImeEvent::Preedit {
+                        text: preedit_text,
+                        active_range_chars: None,
+                    }));
+                    return;
+                }
+                match input_type.as_str() {
                     "insertText" | "insertReplacementText" => {
-                        let text = event.data().unwrap_or_else(|| input_for_event.value());
-                        if !text.is_empty() {
-                            push_event(egui::Event::Text(text));
+                        let previous = last_text.borrow().clone();
+                        let prefix_len = longest_common_prefix_length(&text, &previous);
+                        let previous_len = previous.chars().count();
+                        if prefix_len < previous_len {
+                            push_event(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
+                                before_chars: previous_len - prefix_len,
+                                after_chars: 0,
+                            }));
+                        }
+                        let inserted_text = text.chars().skip(prefix_len).collect::<String>();
+                        if !inserted_text.is_empty() {
+                            push_event(egui::Event::Text(inserted_text));
                         }
                     }
                     "deleteContentBackward" => {
                         push_event(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
                             before_chars: 1,
                             after_chars: 0,
-                        }))
+                        }));
                     }
                     "deleteContentForward" => {
                         push_event(egui::Event::Ime(egui::ImeEvent::DeleteSurrounding {
                             before_chars: 0,
                             after_chars: 1,
-                        }))
+                        }));
                     }
                     _ => {}
                 }
                 input_for_event.set_value("");
+                last_text.borrow_mut().clear();
             });
         }
 
@@ -177,6 +206,7 @@ pub(crate) fn install() {
             _listeners: listeners,
             focused,
             ime_enabled,
+            last_text,
         });
     });
 }
@@ -197,8 +227,16 @@ pub(crate) fn update_focus(ime_enabled: bool) {
         } else if was_ime_enabled {
             let _ = input.input.blur();
             input.input.set_value("");
+            input.last_text.borrow_mut().clear();
         }
     });
+}
+
+fn longest_common_prefix_length(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 fn add_listener(
