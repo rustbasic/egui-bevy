@@ -17,6 +17,9 @@ struct WebInput {
     _listeners: Vec<Closure<dyn FnMut(Event)>>,
     focused: Rc<Cell<bool>>,
     ime_enabled: Rc<Cell<bool>>,
+    composing: Rc<Cell<bool>>,
+    suppress_composition_end: Rc<Cell<bool>>,
+    preedit_text: Rc<RefCell<String>>,
     last_text: Rc<RefCell<String>>,
 }
 
@@ -61,6 +64,8 @@ pub(crate) fn install() {
         }
 
         let composing = Rc::new(Cell::new(false));
+        let suppress_composition_end = Rc::new(Cell::new(false));
+        let preedit_text = Rc::new(RefCell::new(String::new()));
         let last_text = Rc::new(RefCell::new(String::new()));
         let focused = Rc::new(Cell::new(false));
         let ime_enabled = Rc::new(Cell::new(false));
@@ -68,17 +73,28 @@ pub(crate) fn install() {
 
         {
             let composing = composing.clone();
+            let suppress_composition_end = suppress_composition_end.clone();
+            let preedit_text = preedit_text.clone();
             add_listener(&input, "compositionstart", &mut listeners, move |_| {
                 composing.set(true);
+                suppress_composition_end.set(false);
+                preedit_text.borrow_mut().clear();
             });
         }
 
         {
             let composing = composing.clone();
+            let suppress_composition_end = suppress_composition_end.clone();
+            let preedit_text = preedit_text.clone();
             let last_text = last_text.clone();
             let input_for_event = input.clone();
             add_listener(&input, "compositionend", &mut listeners, move |event| {
                 composing.set(false);
+                if suppress_composition_end.replace(false) {
+                    preedit_text.borrow_mut().clear();
+                    // Keep the committed value until the browser's trailing input event can be deduplicated.
+                    return;
+                }
                 let Ok(event) = event.dyn_into::<web_sys::CompositionEvent>() else {
                     return;
                 };
@@ -90,6 +106,7 @@ pub(crate) fn install() {
                     text = commit_text.clone();
                     input_for_event.set_value(&text);
                 }
+                preedit_text.borrow_mut().clear();
                 // Some IMEs emit a final input event after compositionend; retain the value so it can be deduplicated.
                 *last_text.borrow_mut() = text;
                 push_event(egui::Event::Ime(egui::ImeEvent::Commit(commit_text)));
@@ -98,6 +115,8 @@ pub(crate) fn install() {
 
         {
             let composing = composing.clone();
+            let suppress_composition_end = suppress_composition_end.clone();
+            let preedit_text_state = preedit_text.clone();
             let last_text = last_text.clone();
             let input_for_event = input.clone();
             add_listener(&input, "input", &mut listeners, move |event| {
@@ -108,6 +127,9 @@ pub(crate) fn install() {
                 let is_composing = composing.get() || event.is_composing();
                 let text = input_for_event.value();
                 if is_composing {
+                    if suppress_composition_end.get() {
+                        return;
+                    }
                     let previous = last_text.borrow().clone();
                     let prefix_len = longest_common_prefix_length(&text, &previous);
                     let previous_len = previous.chars().count();
@@ -117,7 +139,8 @@ pub(crate) fn install() {
                             after_chars: 0,
                         }));
                     }
-                    let preedit_text = text.chars().skip(prefix_len).collect();
+                    let preedit_text = text.chars().skip(prefix_len).collect::<String>();
+                    *preedit_text_state.borrow_mut() = preedit_text.clone();
                     *last_text.borrow_mut() = text.chars().take(prefix_len).collect();
                     push_event(egui::Event::Ime(egui::ImeEvent::Preedit {
                         text: preedit_text,
@@ -156,6 +179,7 @@ pub(crate) fn install() {
                     _ => {}
                 }
                 input_for_event.set_value("");
+                preedit_text_state.borrow_mut().clear();
                 last_text.borrow_mut().clear();
             });
         }
@@ -206,6 +230,9 @@ pub(crate) fn install() {
             _listeners: listeners,
             focused,
             ime_enabled,
+            composing,
+            suppress_composition_end,
+            preedit_text,
             last_text,
         });
     });
@@ -213,6 +240,22 @@ pub(crate) fn install() {
 
 pub(crate) fn take_events() -> Vec<egui::Event> {
     EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
+}
+
+pub(crate) fn commit_preedit_before_pointer() -> Option<egui::Event> {
+    INPUT.with(|slot| {
+        let slot = slot.borrow();
+        let input = slot.as_ref()?;
+        let preedit = std::mem::take(&mut *input.preedit_text.borrow_mut());
+        if preedit.is_empty() {
+            return None;
+        }
+        // Commit before pointer events so egui applies it at the composition's original cursor.
+        input.composing.set(false);
+        input.suppress_composition_end.set(true);
+        *input.last_text.borrow_mut() = input.input.value();
+        Some(egui::Event::Ime(egui::ImeEvent::Commit(preedit)))
+    })
 }
 
 pub(crate) fn update_focus(ime_enabled: bool) {
@@ -227,6 +270,7 @@ pub(crate) fn update_focus(ime_enabled: bool) {
         } else if was_ime_enabled {
             let _ = input.input.blur();
             input.input.set_value("");
+            input.preedit_text.borrow_mut().clear();
             input.last_text.borrow_mut().clear();
         }
     });

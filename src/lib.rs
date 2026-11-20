@@ -190,6 +190,12 @@ fn collect_input(
             continue;
         }
         touch_event_seen = true;
+        if event.phase == BevyTouchPhase::Started && ui.pointer_touch_id.is_none() {
+            #[cfg(target_arch = "wasm32")]
+            if let Some(commit) = web_input::commit_preedit_before_pointer() {
+                ui.events.push(commit);
+            }
+        }
         let pos = egui::pos2(event.position.x, event.position.y);
         let phase = match event.phase {
             BevyTouchPhase::Started => egui::TouchPhase::Start,
