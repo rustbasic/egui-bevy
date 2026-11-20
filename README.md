@@ -6,7 +6,7 @@ A small integration between egui and Bevy.
 
 [Open the WebGPU demo](https://rustbasic.github.io/egui-bevy/)
 
-![Screenshot of the Windows 3D overlay example](egui-bevy-v015.png)
+![Screenshot of the Windows 3D overlay example](egui-bevy-v022.png)
 
 ## Dependencies
 
