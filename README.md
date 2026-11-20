@@ -4,8 +4,8 @@ A small integration between egui and Bevy.
 
 ## Dependencies
 
-- [egui](https://github.com/emilk/egui) 0.37.0
-- [Bevy](https://github.com/bevyengine/bevy) 0.20.1
+- [egui](https://github.com/emilk/egui) ^0.37.0
+- [Bevy](https://github.com/bevyengine/bevy) ^0.20.0
 
 These are the versions currently used by this library.
 
