@@ -2,6 +2,10 @@
 
 A small integration between egui and Bevy.
 
+## Live Demo
+
+[Open the WebGPU demo](https://rustbasic.github.io/egui-bevy/)
+
 ## Dependencies
 
 - [egui](https://github.com/emilk/egui) ^0.37.0
