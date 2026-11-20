@@ -25,11 +25,13 @@ jobs:
           mkdir -p preview-site
           wasm-bindgen --target web --out-dir preview-site --out-name wasm_3d_overlay examples/wasm-3d-overlay/target/wasm32-unknown-unknown/release/egui-bevy-wasm-3d-overlay.wasm
           cp examples/wasm-3d-overlay/web/index.html preview-site/index.html
-      - name: Record source revision
+      - name: Record preview metadata
         env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           mkdir -p preview-meta
+          printf '%s\n' "$PR_NUMBER" > preview-meta/pr-number
           printf '%s\n' "$PR_HEAD_SHA" > preview-meta/head-sha
       - uses: actions/upload-artifact@v4
         with:

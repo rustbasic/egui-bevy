@@ -20,36 +20,58 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Find the associated open pull request
+      - uses: actions/download-artifact@v4
+        with:
+          name: preview-meta
+          path: preview-meta
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Read and validate preview metadata
+        id: meta
+        run: |
+          PR_NUMBER=$(cat preview-meta/pr-number)
+          PR_HEAD_SHA=$(cat preview-meta/head-sha)
+          if [[ ! "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Invalid PR number in preview metadata."
+            exit 1
+          fi
+          if [[ ! "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Invalid head SHA in preview metadata."
+            exit 1
+          fi
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+      - name: Verify the metadata pull request is open
         id: pr
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.number }}
         with:
           script: |
-            const run = context.payload.workflow_run;
-            let candidates = run.pull_requests || [];
-            if (candidates.length === 0) {
-              const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                commit_sha: run.head_sha,
-              });
-              candidates = response.data;
-            }
-            const candidate = candidates.find(pr =>
-              pr.head?.ref === run.head_branch &&
-              (!run.head_repository?.full_name || pr.head?.repo?.full_name === run.head_repository.full_name)
-            );
-            if (!candidate) {
-              core.notice('No matching pull request was found; skipping preview deployment.');
-              core.setOutput('number', '');
-              core.setOutput('head_sha', '');
+            const number = Number(process.env.PR_NUMBER);
+            if (!Number.isSafeInteger(number) || number < 1) {
+              core.setFailed('Invalid PR number in preview metadata.');
               return;
             }
             const { data: pr } = await github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: candidate.number,
+              pull_number: number,
             });
+            const run = context.payload.workflow_run;
+            const linkedPullRequests = run.pull_requests || [];
+            if (linkedPullRequests.length > 0 && !linkedPullRequests.some(linked => linked.number === pr.number)) {
+              core.setFailed('Preview metadata PR number does not match the build run.');
+              return;
+            }
+            if (pr.head.ref !== run.head_branch) {
+              core.setFailed('Preview metadata PR branch does not match the build run.');
+              return;
+            }
+            const runHeadRepository = run.head_repository?.full_name;
+            if (runHeadRepository && pr.head.repo?.full_name !== runHeadRepository) {
+              core.setFailed('Preview metadata PR repository does not match the build run.');
+              return;
+            }
             if (pr.state !== 'open') {
               core.notice('Pull request is no longer open; skipping preview deployment.');
               core.setOutput('number', '');
@@ -63,13 +85,6 @@ jobs:
         with:
           name: preview-site
           path: preview-site
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
-      - uses: actions/download-artifact@v4
-        if: steps.pr.outputs.number != ''
-        with:
-          name: preview-meta
-          path: preview-meta
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
       - name: Verify the artifact matches the current PR revision
