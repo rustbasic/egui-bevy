@@ -6,6 +6,8 @@ A small integration between egui and Bevy.
 
 [Open the WebGPU demo](https://rustbasic.github.io/egui-bevy/)
 
+![Screenshot of the Windows 3D overlay example](egui-bevy-v015.png)
+
 ## Dependencies
 
 - [egui](https://github.com/emilk/egui) ^0.37.0
@@ -33,8 +35,6 @@ The callback runs on Bevy's main thread. The plugin forwards mouse, keyboard, DP
 
 `examples/windows-overlay` demonstrates a 2D scene with egui. `examples/windows-3d-overlay` demonstrates a rotating 3D cube with interactive egui controls on Windows.
 `examples/wasm-3d-overlay` is the WebGPU-only browser version. It is intended for GitHub Pages and requires a browser with WebGPU support; it does not include a WebGL2 fallback.
-
-![Screenshot of the Windows 3D overlay example](egui-bevy-v015.png)
 
 ## Development
 
