@@ -175,6 +175,7 @@ impl CanvasGlyphs {
         self.context.set_font(font);
         self.context.set_text_baseline("alphabetic");
         self.context.set_fill_style_str(fill_style);
+
         // Canvas positions text by its baseline, while the image starts at its top-left.
         self.context
             .fill_text(
