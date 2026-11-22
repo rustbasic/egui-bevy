@@ -1,8 +1,8 @@
 # Multi-viewport example
 
-This example uses `EguiBevyPlugin::with_shared_viewports()` on native platforms to share one egui context between the primary Bevy window and an existing Inspector window. The primary UI requests a deferred viewport with `show_viewport_deferred`, and `EguiViewport` maps it to the Inspector window.
+This example requests two deferred viewports while sharing one egui context on native platforms: the Mapped Inspector is associated with an existing Bevy window using `EguiViewport` and renders a 3D cube, while the Automatic Preview has no mapping and gets a Bevy window and camera created by the plugin.
 
-The Inspector callback uses its `ViewportClass` rather than a platform check: an embedded viewport draws its circle and text edit directly in the supplied `Ui`, while a separate viewport opens an `egui::Window` and displays the Bevy-rendered circle. The Bevy circle is hidden while the callback is embedded, including if embedding is enabled on a native platform. In a browser, the deferred Inspector viewport is embedded in the root viewport.
+Both callbacks draw directly into the supplied `Ui` when the viewport is embedded, and use an `egui::Window` when running in a native viewport window. The 3D cube is rendered only in the native Mapped Inspector Bevy window. In a browser, both deferred viewports remain embedded in the root viewport.
 
 ## Run natively
 

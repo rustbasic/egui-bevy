@@ -17,7 +17,7 @@ use bevy::{
 };
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex, atomic::AtomicBool},
 };
 mod input;
@@ -48,7 +48,10 @@ impl EguiBevyPlugin {
         }
     }
 
-    /// Uses one egui context for the primary window and windows marked with [`EguiViewport`].
+    /// Uses one egui context for the primary window and deferred child viewports.
+    ///
+    /// Existing secondary windows can be mapped with [`EguiViewport`]; on native platforms,
+    /// unmapped deferred viewports get their own Bevy window and camera. WASM viewports remain embedded.
     pub fn with_shared_viewports(mut self) -> Self {
         self.shared_viewports = true;
         self
@@ -61,6 +64,8 @@ impl EguiBevyPlugin {
 /// with `egui::Context::show_viewport_deferred` in the UI callback.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct EguiViewport(pub egui::ViewportId);
+#[derive(Component)]
+pub(crate) struct AutoViewportCamera(Entity);
 
 fn create_context(shared_viewports: bool) -> egui::Context {
     let context = egui::Context::default();
@@ -117,6 +122,7 @@ struct FramePacket {
 struct RenderState {
     context: egui::Context,
     pending_frame: Arc<Mutex<Option<FramePacket>>>,
+    initial_textures: HashMap<egui::TextureId, Vec<egui::epaint::ImageDelta>>,
     ime_enabled: Arc<AtomicBool>,
     ime_position: Arc<Mutex<Vec2>>,
 }
@@ -127,6 +133,9 @@ struct UiStates {
     shared_viewports: bool,
     shared_context: Option<egui::Context>,
     windows: BTreeMap<Entity, UiState>,
+    texture_snapshot: HashMap<egui::TextureId, Vec<egui::epaint::ImageDelta>>,
+    auto_viewports: BTreeMap<egui::ViewportId, Entity>,
+    closed_viewports: BTreeSet<egui::ViewportId>,
 }
 
 #[derive(Resource, Default, Clone)]
@@ -161,9 +170,13 @@ impl Plugin for EguiBevyPlugin {
                 shared_viewports: self.shared_viewports,
                 shared_context: self.shared_viewports.then(|| create_context(true)),
                 windows: BTreeMap::new(),
+                texture_snapshot: HashMap::new(),
+                auto_viewports: BTreeMap::new(),
+                closed_viewports: BTreeSet::new(),
             })
             .insert_resource(RenderStates::default())
             .add_plugins(ExtractResourcePlugin::<RenderStates>::default())
+            .add_systems(Update, ui::cleanup_auto_viewport_cameras)
             .add_systems(
                 Update,
                 (input::collect_input, ui::run_ui)
@@ -224,9 +237,16 @@ fn render_egui(
 
     if let Some(packet) = packet.as_mut() {
         let device = render_device.wgpu_device();
-        let renderer = cache
-            .renderer
-            .get_or_insert_with(|| Renderer::new(device, format, RendererOptions::default()));
+        let renderer = cache.renderer.get_or_insert_with(|| {
+            let mut renderer = Renderer::new(device, format, RendererOptions::default());
+            // A late viewport renderer must replay live texture allocations before partial updates.
+            for (id, deltas) in &state.initial_textures {
+                for delta in deltas {
+                    renderer.update_texture(device, &render_queue, *id, delta);
+                }
+            }
+            renderer
+        });
         for (id, deltas) in packet.output.textures_delta.set.drain() {
             for delta in deltas {
                 renderer.update_texture(device, &render_queue, id, &delta);
