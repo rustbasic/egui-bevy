@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p dist
           wasm-bindgen --target web --out-dir dist --out-name wasm_3d_overlay examples/wasm-3d-overlay/target/wasm32-unknown-unknown/release/egui-bevy-wasm-3d-overlay.wasm
-          cp examples/wasm-3d-overlay/web/index.html dist/index.html
+          cp examples/wasm-3d-overlay/index.html dist/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

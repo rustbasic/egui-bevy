@@ -24,7 +24,7 @@ jobs:
         run: |
           mkdir -p preview-site
           wasm-bindgen --target web --out-dir preview-site --out-name wasm_3d_overlay examples/wasm-3d-overlay/target/wasm32-unknown-unknown/release/egui-bevy-wasm-3d-overlay.wasm
-          cp examples/wasm-3d-overlay/web/index.html preview-site/index.html
+          cp examples/wasm-3d-overlay/index.html preview-site/index.html
       - name: Record preview metadata
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
