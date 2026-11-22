@@ -20,43 +20,7 @@ fn main() {
 fn run_app() {
     let mapped = mapped_viewport();
     let automatic = automatic_viewport();
-    let plugin = EguiBevyPlugin::new(move |ctx| {
-        show_viewport_window(
-            ctx,
-            "Primary viewport",
-            egui::Id::unique("primary_text_edit"),
-            "Bevy rectangle on render layer 0.",
-            "Enter primary notes...",
-        );
-        ctx.show_viewport_deferred(
-            mapped,
-            egui::ViewportBuilder::default().with_title("Mapped Inspector viewport"),
-            |ui, class| {
-                let id = egui::Id::unique("mapped_inspector_text_edit");
-                if class == egui::ViewportClass::EmbeddedWindow {
-                    show_inspector_contents(ui, id);
-                } else {
-                    egui::Window::new("Mapped Inspector UI").show(ui.ctx(), |ui| {
-                        show_inspector_contents(ui, id);
-                    });
-                }
-            },
-        );
-        ctx.show_viewport_deferred(
-            automatic,
-            egui::ViewportBuilder::default().with_title("Automatic Preview viewport"),
-            |ui, class| {
-                let id = egui::Id::unique("automatic_preview_text_edit");
-                if class == egui::ViewportClass::EmbeddedWindow {
-                    show_preview_contents(ui, id);
-                } else {
-                    egui::Window::new("Automatic Preview UI").show(ui.ctx(), |ui| {
-                        show_preview_contents(ui, id);
-                    });
-                }
-            },
-        );
-    });
+    let plugin = EguiBevyPlugin::new(move |ctx| show_ui(ctx, mapped, automatic));
 
     #[cfg(not(target_arch = "wasm32"))]
     let plugin = plugin.with_shared_viewports();
@@ -115,6 +79,46 @@ fn show_preview_contents(ui: &mut egui::Ui, id: egui::Id) {
         id,
         "No EguiViewport mapping; the plugin creates this window.",
         "Enter preview notes...",
+    );
+}
+
+fn show_ui(ctx: &egui::Context, mapped: egui::ViewportId, automatic: egui::ViewportId) {
+    show_viewport_window(
+        ctx,
+        "Primary viewport",
+        egui::Id::unique("primary_text_edit"),
+        "Bevy rectangle on render layer 0.",
+        "Enter primary notes...",
+    );
+
+    ctx.show_viewport_deferred(
+        mapped,
+        egui::ViewportBuilder::default().with_title("Mapped Inspector viewport"),
+        |ui, class| {
+            let id = egui::Id::unique("mapped_inspector_text_edit");
+            if class == egui::ViewportClass::EmbeddedWindow {
+                show_inspector_contents(ui, id);
+            } else {
+                egui::Window::new("Mapped Inspector UI").show(ui.ctx(), |ui| {
+                    show_inspector_contents(ui, id);
+                });
+            }
+        },
+    );
+
+    ctx.show_viewport_deferred(
+        automatic,
+        egui::ViewportBuilder::default().with_title("Automatic Preview viewport"),
+        |ui, class| {
+            let id = egui::Id::unique("automatic_preview_text_edit");
+            if class == egui::ViewportClass::EmbeddedWindow {
+                show_preview_contents(ui, id);
+            } else {
+                egui::Window::new("Automatic Preview UI").show(ui.ctx(), |ui| {
+                    show_preview_contents(ui, id);
+                });
+            }
+        },
     );
 }
 
