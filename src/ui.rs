@@ -1,8 +1,15 @@
+#[cfg(not(target_arch = "wasm32"))]
+use super::EguiViewport;
 #[cfg(target_arch = "wasm32")]
 use super::web_input;
 use super::{
-    EguiPointerState, EguiWindowPointerStates, FramePacket, RenderStates, UiState, UiStates,
+    AutoViewportCamera, EguiPointerState, EguiWindowPointerStates, FramePacket, RenderStates,
+    UiState, UiStates,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::camera::{Camera2d, RenderTarget, visibility::RenderLayers};
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::window::WindowRef;
 use bevy::{
     clipboard::Clipboard,
     prelude::*,
@@ -94,7 +101,9 @@ fn finish_output(
 }
 
 pub(super) fn run_ui(
+    #[cfg(not(target_arch = "wasm32"))] mut commands: Commands,
     mut states: ResMut<UiStates>,
+    #[cfg(not(target_arch = "wasm32"))] auto_cameras: Query<(Entity, &AutoViewportCamera)>,
     render_states: Res<RenderStates>,
     mut pointer_states: ResMut<EguiWindowPointerStates>,
     mut primary_pointer: ResMut<EguiPointerState>,
@@ -167,6 +176,70 @@ pub(super) fn run_ui(
             callback(ctx);
         }),
     )];
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Keep closed viewports suppressed while requested; dropping the request permits reopening.
+        states
+            .closed_viewports
+            .retain(|viewport_id| outputs[0].1.viewport_output.contains_key(viewport_id));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if states.shared_viewports {
+        for (&viewport_id, viewport) in &outputs[0].1.viewport_output {
+            if viewport_id == root_id
+                || viewport.viewport_ui_cb.is_none()
+                || viewport.class == egui::ViewportClass::EmbeddedWindow
+            {
+                continue;
+            }
+            if let Some(window_entity) = states.auto_viewports.get(&viewport_id).copied() {
+                if viewport
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, egui::ViewportCommand::Close))
+                {
+                    commands.entity(window_entity).despawn();
+                    for (camera, auto_camera) in &auto_cameras {
+                        if auto_camera.0 == window_entity {
+                            commands.entity(camera).despawn();
+                        }
+                    }
+                    states.auto_viewports.remove(&viewport_id);
+                    states.closed_viewports.insert(viewport_id);
+                }
+                continue;
+            }
+            if states.closed_viewports.contains(&viewport_id)
+                || states
+                    .windows
+                    .values()
+                    .any(|ui| ui.viewport_id == viewport_id)
+            {
+                continue;
+            }
+            let mut window = Window::default();
+            window.title = viewport
+                .builder
+                .title
+                .clone()
+                .unwrap_or_else(|| "egui viewport".to_owned());
+            if let Some(size) = viewport.builder.inner_size {
+                window.resolution.set(size.x, size.y);
+            }
+            if let Some(visible) = viewport.builder.visible {
+                window.visible = visible;
+            }
+            let window_entity = commands.spawn((window, EguiViewport(viewport_id))).id();
+            commands.spawn((
+                Camera2d,
+                // Generated egui viewports must not render unrelated Bevy scene layers.
+                RenderLayers::none(),
+                RenderTarget::Window(WindowRef::Entity(window_entity)),
+                AutoViewportCamera(window_entity),
+            ));
+            states.auto_viewports.insert(viewport_id, window_entity);
+        }
+    }
 
     for (entity, ui) in &mut states.windows {
         if *entity == primary {
@@ -201,6 +274,18 @@ pub(super) fn run_ui(
         shared_textures.append(std::mem::take(&mut output.textures_delta));
     }
 
+    for (id, deltas) in &shared_textures.set {
+        let history = states.texture_snapshot.entry(*id).or_default();
+        for delta in deltas {
+            if delta.pos.is_none() {
+                history.clear();
+            }
+            history.push(delta.clone());
+        }
+    }
+    for id in &shared_textures.free {
+        states.texture_snapshot.remove(id);
+    }
     for (entity, mut output) in outputs {
         let Some(ui) = states.windows.get(&entity) else {
             continue;
@@ -221,4 +306,16 @@ pub(super) fn run_ui(
     }
 
     shared_textures.clear();
+}
+
+pub(super) fn cleanup_auto_viewport_cameras(
+    mut commands: Commands,
+    windows: Query<Entity, With<Window>>,
+    cameras: Query<(Entity, &AutoViewportCamera)>,
+) {
+    for (camera, auto_camera) in &cameras {
+        if windows.get(auto_camera.0).is_err() {
+            commands.entity(camera).despawn();
+        }
+    }
 }

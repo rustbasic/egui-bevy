@@ -65,6 +65,15 @@ pub(super) fn collect_input(
         return;
     };
     states.windows.retain(|entity, _| existing.contains(entity));
+    let removed_viewports: Vec<_> = states
+        .auto_viewports
+        .iter()
+        .filter_map(|(viewport_id, entity)| (!existing.contains(entity)).then_some(*viewport_id))
+        .collect();
+    for viewport_id in removed_viewports {
+        states.auto_viewports.remove(&viewport_id);
+        states.closed_viewports.insert(viewport_id);
+    }
     render_states
         .0
         .retain(|entity, _| existing.contains(entity));
@@ -73,6 +82,7 @@ pub(super) fn collect_input(
         .retain(|entity, _| existing.contains(entity));
 
     let shared_context = states.shared_context.clone();
+    let texture_snapshot = states.texture_snapshot.clone();
     for (entity, viewport_id, size, scale, cursor) in &window_info {
         states.windows.entry(*entity).or_insert_with(|| {
             let context = shared_context
@@ -112,6 +122,7 @@ pub(super) fn collect_input(
                 pending_frame: Arc::new(Mutex::new(None)),
                 ime_enabled: Arc::new(AtomicBool::new(false)),
                 ime_position: Arc::new(Mutex::new(Vec2::ZERO)),
+                initial_textures: texture_snapshot.clone(),
             }
         });
     }
