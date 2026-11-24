@@ -15,6 +15,7 @@ use bevy::{
     prelude::*,
     window::{PrimaryWindow, Window},
 };
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 fn make_raw_input(
@@ -35,6 +36,23 @@ fn make_raw_input(
     }
 }
 
+fn update_texture_snapshot(
+    snapshot: &mut HashMap<egui::TextureId, Vec<egui::epaint::ImageDelta>>,
+    textures_delta: &egui::TexturesDelta,
+) {
+    for (id, deltas) in &textures_delta.set {
+        let history = snapshot.entry(*id).or_default();
+        for delta in deltas {
+            if delta.pos.is_none() {
+                history.clear();
+            }
+            history.push(delta.clone());
+        }
+    }
+    for id in &textures_delta.free {
+        snapshot.remove(id);
+    }
+}
 fn finish_output(
     entity: Entity,
     output: egui::FullOutput,
@@ -113,7 +131,12 @@ pub(super) fn run_ui(
 ) {
     let primary = primary_window.single().ok();
     if !states.shared_viewports {
-        for (entity, ui) in &mut states.windows {
+        let UiStates {
+            windows: window_states,
+            window_texture_snapshots: texture_snapshots,
+            ..
+        } = &mut *states;
+        for (entity, ui) in window_states {
             let mut viewports = egui::ViewportIdMap::default();
             let scale = ui.pixels_per_point.max(f32::EPSILON);
             viewports.insert(
@@ -125,6 +148,10 @@ pub(super) fn run_ui(
             );
             let input = make_raw_input(ui, viewports);
             let output = ui.context.run_ui(input, |ctx| (ui.ui)(ctx));
+            update_texture_snapshot(
+                texture_snapshots.entry(*entity).or_default(),
+                &output.textures_delta,
+            );
             finish_output(
                 *entity,
                 output,
@@ -274,18 +301,7 @@ pub(super) fn run_ui(
         shared_textures.append(std::mem::take(&mut output.textures_delta));
     }
 
-    for (id, deltas) in &shared_textures.set {
-        let history = states.texture_snapshot.entry(*id).or_default();
-        for delta in deltas {
-            if delta.pos.is_none() {
-                history.clear();
-            }
-            history.push(delta.clone());
-        }
-    }
-    for id in &shared_textures.free {
-        states.texture_snapshot.remove(id);
-    }
+    update_texture_snapshot(&mut states.texture_snapshot, &shared_textures);
     for (entity, mut output) in outputs {
         let Some(ui) = states.windows.get(&entity) else {
             continue;
