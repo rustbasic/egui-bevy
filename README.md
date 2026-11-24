@@ -25,6 +25,8 @@ I haven't yet evaluated the relative advantages and disadvantages of `bevy_egui`
 
 The library provides `EguiBevyPlugin` for displaying egui over Core2d or Core3d output in each Bevy window. Add it after Bevy's renderer plugins and provide a callback that builds each egui frame:
 
+The graphics backend is configured when Bevy's `RenderPlugin` is initialized, before adding `EguiBevyPlugin`; this integration plugin does not change an already initialized renderer. Use `DefaultPlugins.set(egui_bevy::render_plugin_with_backend(egui_bevy::RenderBackend::Default))` for platform defaults: `WGPU_BACKEND` is honored when set, otherwise Windows uses DX12, Apple platforms use Metal, and other native platforms use Vulkan. Explicit `RenderBackend` variants override `WGPU_BACKEND`. The existing `default_render_plugin()` helper remains available to prefer DX12 on Windows Native while retaining Bevy defaults elsewhere. Enable the corresponding Bevy render features; native GL may require `bevy_render/gles` and a compatible ANGLE setup.
+
 ```rust,ignore
 app.add_plugins(EguiBevyPlugin::new(|ctx| {
     egui::Window::new("Hello").show(ctx, |ui| ui.label("Hello from egui"));

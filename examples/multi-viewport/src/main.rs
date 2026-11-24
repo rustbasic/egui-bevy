@@ -1,5 +1,5 @@
 use bevy::{camera::visibility::RenderLayers, prelude::*};
-use egui_bevy::EguiBevyPlugin;
+use egui_bevy::{render_plugin_with_backend, EguiBevyPlugin, RenderBackend};
 #[cfg(not(target_arch = "wasm32"))]
 use egui_bevy::EguiViewport;
 
@@ -26,7 +26,7 @@ fn run_app() {
     let plugin = plugin.with_shared_viewports();
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
+        .add_plugins(DefaultPlugins.set(render_plugin_with_backend(RenderBackend::Default)).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "egui-bevy multi-viewport root".into(),
                 #[cfg(target_arch = "wasm32")]

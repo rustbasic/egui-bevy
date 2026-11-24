@@ -65,6 +65,9 @@ pub(super) fn collect_input(
         return;
     };
     states.windows.retain(|entity, _| existing.contains(entity));
+    states
+        .window_texture_snapshots
+        .retain(|entity, _| existing.contains(entity));
     let removed_viewports: Vec<_> = states
         .auto_viewports
         .iter()
@@ -82,8 +85,17 @@ pub(super) fn collect_input(
         .retain(|entity, _| existing.contains(entity));
 
     let shared_context = states.shared_context.clone();
-    let texture_snapshot = states.texture_snapshot.clone();
+    let shared_viewports = states.shared_viewports;
     for (entity, viewport_id, size, scale, cursor) in &window_info {
+        let texture_snapshot = Arc::new(if shared_viewports {
+            states.texture_snapshot.clone()
+        } else {
+            states
+                .window_texture_snapshots
+                .get(entity)
+                .cloned()
+                .unwrap_or_default()
+        });
         states.windows.entry(*entity).or_insert_with(|| {
             let context = shared_context
                 .clone()
@@ -115,7 +127,7 @@ pub(super) fn collect_input(
         if let Some(read) = state.pending_clipboard_read.take() {
             append_clipboard_read(state, read);
         }
-        render_states.0.entry(*entity).or_insert_with(|| {
+        let render_state = render_states.0.entry(*entity).or_insert_with(|| {
             let context = state.context.clone();
             RenderState {
                 context,
@@ -125,6 +137,7 @@ pub(super) fn collect_input(
                 initial_textures: texture_snapshot.clone(),
             }
         });
+        render_state.initial_textures = texture_snapshot.clone();
     }
 
     #[cfg(target_arch = "wasm32")]
