@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 bevy = { version = "=0.20.1", default-features = false, features = ["2d", "3d"] }
 egui = { version = "0.37.0", features = ["default_fonts"] }
+# egui = { path = "../../../egui/crates/egui", features = ["default_fonts"] }
 egui-bevy = { path = "../.." }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -220,6 +220,8 @@ struct RenderState {
 struct UiStates {
     callback: Option<Arc<UiCallback>>,
     shared_viewports: bool,
+    // Distinguish startup before the primary window exists from the root being closed.
+    root_window_seen: bool,
     shared_context: Option<egui::Context>,
     windows: BTreeMap<Entity, UiState>,
     texture_snapshot: HashMap<egui::TextureId, Vec<egui::epaint::ImageDelta>>,
@@ -277,6 +279,7 @@ impl Plugin for EguiBevyPlugin {
             .insert_resource(UiStates {
                 callback: Some(self.ui.clone()),
                 shared_viewports: self.shared_viewports,
+                root_window_seen: false,
                 shared_context: self.shared_viewports.then(|| create_context(true)),
                 windows: BTreeMap::new(),
                 texture_snapshot: HashMap::new(),

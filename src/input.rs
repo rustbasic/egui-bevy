@@ -64,6 +64,16 @@ pub(super) fn collect_input(
     let Some(callback) = states.callback.clone() else {
         return;
     };
+    // A removed mapped window must suppress its still-requested deferred viewport too.
+    let removed_window_viewports: Vec<_> = states
+        .windows
+        .iter()
+        .filter_map(|(entity, ui)| {
+            (!existing.contains(entity) && ui.viewport_id != egui::ViewportId::ROOT)
+                .then_some(ui.viewport_id)
+        })
+        .collect();
+    states.closed_viewports.extend(removed_window_viewports);
     states.windows.retain(|entity, _| existing.contains(entity));
     states
         .window_texture_snapshots
