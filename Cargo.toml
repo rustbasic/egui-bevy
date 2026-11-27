@@ -22,6 +22,7 @@ egui-wgpu = { version = "0.37.0", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 egui_system_font_provider = "0.37.0"
+# egui_system_font_provider = { path = "../egui/crates/egui_system_font_provider" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

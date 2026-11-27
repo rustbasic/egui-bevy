@@ -169,8 +169,42 @@ pub(super) fn run_ui(
     }
 
     let Some(primary) = primary else {
+        #[cfg(not(target_arch = "wasm32"))]
+        if states.root_window_seen {
+            let mut viewport_entities: Vec<_> = states.windows.keys().copied().collect();
+            let window_viewports: Vec<_> = states
+                .windows
+                .values()
+                .map(|ui| ui.viewport_id)
+                .filter(|viewport_id| *viewport_id != egui::ViewportId::ROOT)
+                .collect();
+            let auto_viewports: Vec<_> = states
+                .auto_viewports
+                .iter()
+                .map(|(viewport_id, entity)| (*viewport_id, *entity))
+                .collect();
+            states.closed_viewports.extend(window_viewports);
+            for (viewport_id, entity) in auto_viewports {
+                states.closed_viewports.insert(viewport_id);
+                if !states.windows.contains_key(&entity) {
+                    viewport_entities.push(entity);
+                }
+            }
+            for entity in viewport_entities {
+                commands.entity(entity).despawn();
+                for (camera, auto_camera) in &auto_cameras {
+                    if auto_camera.0 == entity {
+                        commands.entity(camera).despawn();
+                    }
+                }
+            }
+            states.windows.clear();
+            states.window_texture_snapshots.clear();
+            states.auto_viewports.clear();
+        }
         return;
     };
+    states.root_window_seen = true;
     let Some(root_ui) = states.windows.get(&primary) else {
         return;
     };
