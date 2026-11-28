@@ -20,10 +20,8 @@ fn main() {
 fn run_app() {
     let mapped = mapped_viewport();
     let automatic = automatic_viewport();
-    let plugin = EguiBevyPlugin::new(move |ctx| show_ui(ctx, mapped, automatic));
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let plugin = plugin.with_shared_viewports();
+    let plugin = EguiBevyPlugin::new(move |ctx| show_ui(ctx, mapped, automatic))
+        .with_shared_viewports();
 
     App::new()
         .add_plugins(DefaultPlugins.set(render_plugin_with_backend(RenderBackend::Default)).set(WindowPlugin {
