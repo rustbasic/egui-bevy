@@ -33,11 +33,11 @@ app.add_plugins(EguiBevyPlugin::new(|ctx| {
 }));
 ```
 
-By default, each Bevy window gets an independent egui context and UI frame. The callback runs on Bevy's main thread. The plugin forwards window-specific pointer, keyboard, DPI, and IME input, as well as clipboard copy, cut, and paste, then composites egui over the window's Core2d or Core3d view. Shared egui state across windows is also available through the explicitly mapped deferred-viewport mode described below. Each Bevy window supports one egui overlay; multiple camera views in one window are not supported. On WebAssembly, browser DOM text input is connected to the primary window only. The integration has been tested on Windows and WebAssembly; other platforms have not yet been tested.
+By default, each Bevy window gets an independent egui context and UI frame. The callback runs on Bevy's main thread. The plugin forwards window-specific pointer, keyboard, DPI, and IME input, as well as clipboard copy, cut, and paste, then composites egui over the window's Core2d or Core3d view. Shared egui state across windows is also available through shared deferred viewports, described below. Each Bevy window supports one egui overlay; multiple camera views in one window are not supported. On WebAssembly, browser DOM text input is connected to the primary window only. The integration has been tested on Windows and WebAssembly; other platforms have not yet been tested.
 
 ### Shared egui viewports
 
-To share one egui context between the primary window and existing secondary Bevy windows, enable `with_shared_viewports()` and map each secondary window with an `EguiViewport` component. Use the same unique `ViewportId` in the component and in `show_viewport_deferred`:
+Enable `with_shared_viewports()` to use one egui context for the root window and its deferred child viewports. To render a child viewport in an existing secondary Bevy window, add `EguiViewport` with the same unique `ViewportId` used by `show_viewport_deferred`, as shown below. On native platforms, an unmapped deferred viewport gets a Bevy window and camera created by the plugin; on WebAssembly, deferred viewports remain embedded in the root viewport:
 
 ```rust,ignore
 let inspector = egui::ViewportId::from_hash_of("inspector");
@@ -61,9 +61,9 @@ app.add_plugins(
 commands.spawn((Window::default(), EguiViewport(inspector)));
 ```
 
-The application must create and manage the Bevy windows itself; egui viewport requests do not automatically create or close Bevy windows. The primary window is the root viewport, and only secondary windows marked with `EguiViewport` are mapped to deferred child viewports.
+The primary window is the root viewport. Existing secondary Bevy windows are associated with deferred child viewports only when marked with `EguiViewport`; on native platforms, the plugin creates a Bevy window and camera for each unmapped deferred viewport.
 
-`examples/windows-overlay` demonstrates a 2D scene with egui. `examples/multi-window` demonstrates per-window egui contexts, while `examples/multi-viewport` demonstrates one shared context across explicitly mapped deferred viewports. `examples/windows-3d-overlay` demonstrates a rotating 3D cube with interactive egui controls on Windows.
+`examples/windows-overlay` demonstrates a 2D scene with egui. `examples/multi-window` demonstrates independent egui contexts in multiple native Bevy windows (the browser version uses one canvas). `examples/multi-viewport` demonstrates shared deferred viewports: a mapped Inspector window and an automatically created native Preview window; both viewports are embedded in the root viewport in a browser. `examples/windows-3d-overlay` demonstrates a rotating 3D cube with interactive egui controls on Windows.
 `examples/wasm-3d-overlay` is the WebGPU-only browser version. It is intended for GitHub Pages and requires a browser with WebGPU support; it does not include a WebGL2 fallback.
 
 ## Development
