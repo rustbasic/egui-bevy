@@ -16,15 +16,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: wasm32-unknown-unknown
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
-      - name: Build the WebAssembly example
-        run: cargo build --release --manifest-path examples/wasm-3d-overlay/Cargo.toml --target wasm32-unknown-unknown
-      - name: Generate preview site
-        run: |
-          mkdir -p preview-site
-          wasm-bindgen --target web --out-dir preview-site --out-name wasm_3d_overlay examples/wasm-3d-overlay/target/wasm32-unknown-unknown/release/egui-bevy-wasm-3d-overlay.wasm
-          cp examples/wasm-3d-overlay/index.html preview-site/index.html
+      - name: Install Binaryen
+        run: sudo apt-get update && sudo apt-get install --yes binaryen
+      - name: Install Trunk
+        run: cargo install trunk --version 0.22.2 --locked
+      - name: Build the WebAssembly preview
+        working-directory: examples/wasm-3d-overlay
+        run: trunk build --release --dist ../../preview-site --public-url ./
       - name: Record preview metadata
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
