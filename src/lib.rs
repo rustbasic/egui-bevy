@@ -156,8 +156,11 @@ pub(crate) struct AutoViewportCamera(Entity);
 fn create_context(shared_viewports: bool) -> egui::Context {
     let context = egui::Context::default();
     if shared_viewports {
-        // Deferred viewports must be rendered in their mapped Bevy windows, not embedded in the root UI.
-        context.set_embed_viewports(false);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Native deferred viewports must be rendered in Bevy windows, not embedded in the root UI.
+            context.set_embed_viewports(false);
+        }
     }
 
     #[cfg(target_arch = "wasm32")]
